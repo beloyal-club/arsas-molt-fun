@@ -2,8 +2,12 @@
   "$schema": "node_modules/wrangler/config-schema.json",
   "name": "arsas-molt-fun",
   "main": "src/index.ts",
+  "account_id": "6a93f4e0f785a77f95436f494bb13fa3",
   "compatibility_date": "2025-05-06",
   "compatibility_flags": ["nodejs_compat"],
+  "vars": {
+    "R2_BUCKET_NAME": "arsas-molt-fun",
+  },
   "observability": {
     "enabled": true,
   },
@@ -59,7 +63,8 @@
   "r2_buckets": [
     {
       "binding": "MOLTBOT_BUCKET",
-      "bucket_name": "arsa-molt-fun","preview_bucket_name": "arsa-molt-fun",
+      "bucket_name": "arsas-molt-fun",
+      "preview_bucket_name": "arsas-molt-fun",
     },
   ],
   // Cron trigger to sync moltbot data to R2 every 5 minutes
