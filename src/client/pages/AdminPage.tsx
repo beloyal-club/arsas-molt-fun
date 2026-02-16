@@ -101,7 +101,7 @@ export default function AdminPage() {
         // Refresh the list
         await fetchDevices();
       } else {
-        setError(result.error || 'Approval failed');
+        setError(result.error || result.stderr || result.stdout || 'Approval failed');
       }
     } catch (err) {
       setError(err instanceof Error ? err.message : 'Failed to approve device');
@@ -117,7 +117,9 @@ export default function AdminPage() {
     try {
       const result = await approveAllDevices();
       if (result.failed && result.failed.length > 0) {
-        setError(`Failed to approve ${result.failed.length} device(s)`);
+        const firstFailure = result.failed[0];
+        const details = firstFailure?.error ? `: ${firstFailure.error}` : '';
+        setError(`Failed to approve ${result.failed.length} device(s)${details}`);
       }
       // Refresh the list
       await fetchDevices();
@@ -163,7 +165,8 @@ export default function AdminPage() {
         setStorageStatus((prev) => (prev ? { ...prev, lastSync: result.lastSync || null } : null));
         setError(null);
       } else {
-        setError(result.error || 'Sync failed');
+        const details = result.details ? `: ${result.details}` : '';
+        setError(`${result.error || 'Sync failed'}${details}`);
       }
     } catch (err) {
       setError(err instanceof Error ? err.message : 'Failed to sync');

@@ -107,14 +107,16 @@ adminApi.post('/devices/:requestId/approve', async (c) => {
     const stderr = logs.stderr || '';
 
     // Check for success indicators (case-insensitive, CLI outputs "Approved ...")
-    const success = stdout.toLowerCase().includes('approved') || proc.exitCode === 0;
+    const success = stdout.toLowerCase().includes('approved');
 
     return c.json({
       success,
       requestId,
-      message: success ? 'Device approved' : 'Approval may have failed',
+      message: success ? 'Device approved' : 'Approval failed',
       stdout,
       stderr,
+      exitCode: proc.exitCode,
+      error: success ? undefined : stderr || stdout || 'Approval failed',
     });
   } catch (error) {
     const errorMessage = error instanceof Error ? error.message : 'Unknown error';
@@ -171,10 +173,15 @@ adminApi.post('/devices/approve-all', async (c) => {
 
         // eslint-disable-next-line no-await-in-loop
         const approveLogs = await approveProc.getLogs();
-        const success =
-          approveLogs.stdout?.toLowerCase().includes('approved') || approveProc.exitCode === 0;
+        const success = approveLogs.stdout?.toLowerCase().includes('approved');
+        const stdout = approveLogs.stdout || '';
+        const stderr = approveLogs.stderr || '';
 
-        results.push({ requestId: device.requestId, success });
+        results.push({
+          requestId: device.requestId,
+          success,
+          error: success ? undefined : stderr || stdout || 'Approval failed',
+        });
       } catch (err) {
         results.push({
           requestId: device.requestId,
@@ -247,6 +254,20 @@ adminApi.get('/storage', async (c) => {
 // POST /api/admin/storage/sync - Trigger a manual sync to R2
 adminApi.post('/storage/sync', async (c) => {
   const sandbox = c.get('sandbox');
+
+  try {
+    await ensureMoltbotGateway(sandbox, c.env);
+  } catch (error) {
+    const errorMessage = error instanceof Error ? error.message : 'Unknown error';
+    return c.json(
+      {
+        success: false,
+        error: 'Gateway failed to start',
+        details: errorMessage,
+      },
+      500,
+    );
+  }
 
   const result = await syncToR2(sandbox, c.env);
 

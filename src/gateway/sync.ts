@@ -57,7 +57,8 @@ export async function syncToR2(sandbox: Sandbox, env: MoltbotEnv): Promise<SyncR
         return {
           success: false,
           error: 'Sync aborted: no config file found',
-          details: 'Neither openclaw.json nor clawdbot.json found in config directory.',
+          details:
+            'Neither openclaw.json nor clawdbot.json found. Start the gateway at least once to create config, then retry.',
         };
       }
     }
@@ -69,9 +70,24 @@ export async function syncToR2(sandbox: Sandbox, env: MoltbotEnv): Promise<SyncR
     };
   }
 
-  // Sync to the new openclaw/ R2 prefix (even if source is legacy .clawdbot)
-  // Also sync workspace directory (excluding skills since they're synced separately)
-  const syncCmd = `rsync -r --no-times --delete --exclude='*.lock' --exclude='*.log' --exclude='*.tmp' ${configDir}/ ${R2_MOUNT_PATH}/openclaw/ && rsync -r --no-times --delete --exclude='skills' /root/clawd/ ${R2_MOUNT_PATH}/workspace/ && rsync -r --no-times --delete /root/clawd/skills/ ${R2_MOUNT_PATH}/skills/ && date -Iseconds > ${R2_MOUNT_PATH}/.last-sync`;
+  // Sync to the new openclaw/ R2 prefix (even if source is legacy .clawdbot).
+  // Also sync workspace + skills directories.
+  //
+  // Compatibility note: some deployments may already have data under "openclaw-workspace/".
+  // We write to both prefixes so restores can succeed regardless of which one exists.
+  // Prefer OpenClaw's workspace directory if it exists.
+  const workspaceDir = '/root/.openclaw/workspace';
+  const legacyWorkspaceDir = '/root/clawd';
+
+  const syncCmd =
+    `rsync -r --no-times --delete --exclude='*.lock' --exclude='*.log' --exclude='*.tmp' ${configDir}/ ${R2_MOUNT_PATH}/openclaw/` +
+    // Workspace: sync OpenClaw workspace if present, otherwise fall back to legacy.
+    ` && (test -d ${workspaceDir} && rsync -r --no-times --delete ${workspaceDir}/ ${R2_MOUNT_PATH}/workspace/ || rsync -r --no-times --delete --exclude='skills' ${legacyWorkspaceDir}/ ${R2_MOUNT_PATH}/workspace/)` +
+    ` && (test -d ${workspaceDir} && rsync -r --no-times --delete ${workspaceDir}/ ${R2_MOUNT_PATH}/openclaw-workspace/ || rsync -r --no-times --delete --exclude='skills' ${legacyWorkspaceDir}/ ${R2_MOUNT_PATH}/openclaw-workspace/)` +
+    // Skills
+    ` && rsync -r --no-times --delete /root/clawd/skills/ ${R2_MOUNT_PATH}/skills/` +
+    ` && rsync -r --no-times --delete /root/clawd/skills/ ${R2_MOUNT_PATH}/openclaw-skills/` +
+    ` && date -Iseconds > ${R2_MOUNT_PATH}/.last-sync`;
 
   try {
     const proc = await sandbox.startProcess(syncCmd);

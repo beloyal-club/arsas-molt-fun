@@ -3,6 +3,7 @@ import type { MoltbotEnv } from '../types';
 import { MOLTBOT_PORT, STARTUP_TIMEOUT_MS } from '../config';
 import { buildEnvVars } from './env';
 import { mountR2Storage } from './r2';
+import { syncToR2 } from './sync';
 
 /**
  * Find an existing OpenClaw gateway process
@@ -116,6 +117,24 @@ export async function ensureMoltbotGateway(sandbox: Sandbox, env: MoltbotEnv): P
     const logs = await process.getLogs();
     if (logs.stdout) console.log('[Gateway] stdout:', logs.stdout);
     if (logs.stderr) console.log('[Gateway] stderr:', logs.stderr);
+    // After a fresh start, attempt an initial R2 sync so pairing persists
+    try {
+      const syncResult = await syncToR2(sandbox, env);
+      if (syncResult.success) {
+        console.log('[Gateway] Initial R2 sync completed at', syncResult.lastSync);
+      } else {
+        console.warn(
+          '[Gateway] Initial R2 sync skipped or failed:',
+          syncResult.error,
+          syncResult.details || '',
+        );
+      }
+    } catch (syncError) {
+      console.warn(
+        '[Gateway] Initial R2 sync error:',
+        syncError instanceof Error ? syncError.message : syncError,
+      );
+    }
   } catch (e) {
     console.error('[Gateway] waitForPort failed:', e);
     try {

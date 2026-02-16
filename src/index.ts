@@ -458,8 +458,14 @@ async function scheduled(
 
   const gatewayProcess = await findExistingMoltbotProcess(sandbox);
   if (!gatewayProcess) {
-    console.log('[cron] Gateway not running yet, skipping sync');
-    return;
+    console.log('[cron] Gateway not running yet, starting for initial sync');
+    try {
+      await ensureMoltbotGateway(sandbox, env);
+    } catch (error) {
+      const errorMessage = error instanceof Error ? error.message : 'Unknown error';
+      console.error('[cron] Failed to start gateway for sync:', errorMessage);
+      return;
+    }
   }
 
   console.log('[cron] Starting backup sync to R2...');
