@@ -137,3 +137,33 @@ export async function triggerSync(): Promise<SyncResponse> {
     method: 'POST',
   });
 }
+
+export interface SecretListResponse {
+  secrets: string[];
+  workerName?: string;
+  error?: string;
+  details?: unknown;
+}
+
+export async function listWorkerSecrets(): Promise<SecretListResponse> {
+  return apiRequest<SecretListResponse>('/secrets');
+}
+
+export interface SetSecretResponse {
+  success: boolean;
+  name?: string;
+  workerName?: string;
+  message?: string;
+  error?: string;
+  details?: unknown;
+}
+
+export async function setWorkerSecret(
+  name: string,
+  value: string,
+): Promise<SetSecretResponse> {
+  return apiRequest<SetSecretResponse>('/secrets', {
+    method: 'POST',
+    body: JSON.stringify({ name, value }),
+  });
+}

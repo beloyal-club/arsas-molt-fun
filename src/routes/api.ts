@@ -13,6 +13,41 @@ import { R2_MOUNT_PATH } from '../config';
 // CLI commands can take 10-15 seconds to complete due to WebSocket connection overhead
 const CLI_TIMEOUT_MS = 20000;
 
+function isValidSecretBindingName(name: string): boolean {
+  // Conservative env-var naming; Cloudflare bindings accept broader names but this avoids surprises.
+  return /^[A-Z][A-Z0-9_]{1,63}$/.test(name);
+}
+
+async function cloudflareApiRequest(
+  params: {
+    accountId: string;
+    apiToken: string;
+    method: string;
+    path: string;
+    body?: unknown;
+  },
+): Promise<{ ok: boolean; status: number; json: unknown; rawText: string }> {
+  const url = `https://api.cloudflare.com/client/v4${params.path}`;
+  const response = await fetch(url, {
+    method: params.method,
+    headers: {
+      Authorization: `Bearer ${params.apiToken}`,
+      'Content-Type': 'application/json',
+    },
+    body: params.body ? JSON.stringify(params.body) : undefined,
+  });
+
+  const rawText = await response.text();
+  let json: unknown = {};
+  try {
+    json = JSON.parse(rawText) as unknown;
+  } catch {
+    // Some errors can return non-JSON; keep rawText for debugging.
+  }
+
+  return { ok: response.ok, status: response.status, json, rawText };
+}
+
 /**
  * API routes
  * - /api/admin/* - Protected admin API routes (Cloudflare Access required)
@@ -326,6 +361,127 @@ adminApi.post('/gateway/restart', async (c) => {
     const errorMessage = error instanceof Error ? error.message : 'Unknown error';
     return c.json({ error: errorMessage }, 500);
   }
+});
+
+// GET /api/admin/secrets - List Worker secret binding names (values are never returned)
+adminApi.get('/secrets', async (c) => {
+  const accountId = c.env.CF_ACCOUNT_ID;
+  const apiToken = c.env.CLOUDFLARE_API_TOKEN;
+  const scriptName = c.env.WORKER_NAME || 'arsas-molt-fun';
+
+  if (!accountId) return c.json({ error: 'CF_ACCOUNT_ID is required' }, 400);
+  if (!apiToken) return c.json({ error: 'CLOUDFLARE_API_TOKEN is required' }, 400);
+
+  const { ok, status, json, rawText } = await cloudflareApiRequest({
+    accountId,
+    apiToken,
+    method: 'GET',
+    path: `/accounts/${accountId}/workers/scripts/${encodeURIComponent(scriptName)}/secrets`,
+  });
+
+  if (!ok) {
+    return c.json(
+      {
+        error: 'Failed to list secrets from Cloudflare API',
+        status,
+        details: rawText || json,
+      },
+      502,
+    );
+  }
+
+  // The CF API returns { success, result: [...] } where items include "name".
+  const names: string[] = [];
+  if (typeof json === 'object' && json !== null) {
+    const maybeResult = (json as Record<string, unknown>).result;
+    if (Array.isArray(maybeResult)) {
+      for (const item of maybeResult) {
+        if (typeof item === 'object' && item !== null) {
+          const name = (item as Record<string, unknown>).name;
+          if (typeof name === 'string') names.push(name);
+        }
+      }
+    }
+  }
+
+  names.sort();
+  return c.json({ secrets: names, workerName: scriptName });
+});
+
+// POST /api/admin/secrets - Create/update a Worker secret binding
+adminApi.post('/secrets', async (c) => {
+  const accountId = c.env.CF_ACCOUNT_ID;
+  const apiToken = c.env.CLOUDFLARE_API_TOKEN;
+  const scriptName = c.env.WORKER_NAME || 'arsas-molt-fun';
+
+  if (!accountId) return c.json({ error: 'CF_ACCOUNT_ID is required' }, 400);
+  if (!apiToken) return c.json({ error: 'CLOUDFLARE_API_TOKEN is required' }, 400);
+
+  let body: { name?: string; value?: string } = {};
+  try {
+    body = (await c.req.json()) as { name?: string; value?: string };
+  } catch {
+    return c.json({ error: 'Invalid JSON body' }, 400);
+  }
+
+  const secretName = (body.name || '').trim();
+  const secretValue = body.value ?? '';
+
+  if (!isValidSecretBindingName(secretName)) {
+    return c.json(
+      { error: 'Invalid secret name. Use A-Z, 0-9, underscore; start with a letter.' },
+      400,
+    );
+  }
+  if (!secretValue || secretValue.length === 0) {
+    return c.json({ error: 'Secret value must not be empty.' }, 400);
+  }
+
+  // Cloudflare has had multiple shapes for this API across versions.
+  // Try the "secret name in path" endpoint first; fall back to the older "/secrets" endpoint.
+  const preferredPath = `/accounts/${accountId}/workers/scripts/${encodeURIComponent(
+    scriptName,
+  )}/secrets/${encodeURIComponent(secretName)}`;
+
+  const fallbackPath = `/accounts/${accountId}/workers/scripts/${encodeURIComponent(scriptName)}/secrets`;
+
+  const payload = { name: secretName, text: secretValue, type: 'secret_text' as const };
+
+  let result = await cloudflareApiRequest({
+    accountId,
+    apiToken,
+    method: 'PUT',
+    path: preferredPath,
+    body: payload,
+  });
+
+  if (!result.ok) {
+    result = await cloudflareApiRequest({
+      accountId,
+      apiToken,
+      method: 'PUT',
+      path: fallbackPath,
+      body: payload,
+    });
+  }
+
+  if (!result.ok) {
+    return c.json(
+      {
+        error: 'Failed to set secret via Cloudflare API',
+        status: result.status,
+        details: result.rawText || result.json,
+      },
+      502,
+    );
+  }
+
+  return c.json({
+    success: true,
+    name: secretName,
+    workerName: scriptName,
+    message: 'Secret stored as a Worker secret. Restart the gateway to apply to the container.',
+  });
 });
 
 // Mount admin API routes under /admin

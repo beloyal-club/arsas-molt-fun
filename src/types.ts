@@ -42,6 +42,10 @@ export interface MoltbotEnv {
   R2_SECRET_ACCESS_KEY?: string;
   R2_BUCKET_NAME?: string; // Override bucket name (default: 'moltbot-data')
   CF_ACCOUNT_ID?: string; // Cloudflare account ID for R2 endpoint
+  // Cloudflare API token (optional): allows admin UI to set Worker secrets via API
+  CLOUDFLARE_API_TOKEN?: string;
+  // Worker script name (used when calling Cloudflare API to update secrets)
+  WORKER_NAME?: string;
   // Browser Rendering binding for CDP shim
   BROWSER?: Fetcher;
   CDP_SECRET?: string; // Shared secret for CDP endpoint authentication

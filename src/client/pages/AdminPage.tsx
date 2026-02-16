@@ -6,11 +6,14 @@ import {
   restartGateway,
   getStorageStatus,
   triggerSync,
+  listWorkerSecrets,
+  setWorkerSecret,
   AuthError,
   type PendingDevice,
   type PairedDevice,
   type DeviceListResponse,
   type StorageStatusResponse,
+  type SecretListResponse,
 } from '../api';
 import './AdminPage.css';
 
@@ -49,6 +52,10 @@ export default function AdminPage() {
   const [pending, setPending] = useState<PendingDevice[]>([]);
   const [paired, setPaired] = useState<PairedDevice[]>([]);
   const [storageStatus, setStorageStatus] = useState<StorageStatusResponse | null>(null);
+  const [secretList, setSecretList] = useState<SecretListResponse | null>(null);
+  const [secretName, setSecretName] = useState('');
+  const [secretValue, setSecretValue] = useState('');
+  const [secretsInProgress, setSecretsInProgress] = useState(false);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [actionInProgress, setActionInProgress] = useState<string | null>(null);
@@ -88,10 +95,22 @@ export default function AdminPage() {
     }
   }, []);
 
+  const fetchSecrets = useCallback(async () => {
+    try {
+      const secrets = await listWorkerSecrets();
+      setSecretList(secrets);
+    } catch (err) {
+      // Non-critical; show a small inline message via error banner if user is trying to use it.
+      console.error('Failed to fetch secrets:', err);
+      setSecretList(null);
+    }
+  }, []);
+
   useEffect(() => {
     fetchDevices();
     fetchStorageStatus();
-  }, [fetchDevices, fetchStorageStatus]);
+    fetchSecrets();
+  }, [fetchDevices, fetchStorageStatus, fetchSecrets]);
 
   const handleApprove = async (requestId: string) => {
     setActionInProgress(requestId);
@@ -175,6 +194,36 @@ export default function AdminPage() {
     }
   };
 
+  const handleSetSecret = async () => {
+    const name = secretName.trim().toUpperCase();
+    if (!name) {
+      setError('Secret name is required');
+      return;
+    }
+    if (!secretValue) {
+      setError('Secret value is required');
+      return;
+    }
+
+    setSecretsInProgress(true);
+    try {
+      const result = await setWorkerSecret(name, secretValue);
+      if (result.success) {
+        setError(null);
+        setSecretName('');
+        setSecretValue('');
+        await fetchSecrets();
+        alert('Secret saved to Worker. Restart the gateway to apply it.');
+      } else {
+        setError(result.error || 'Failed to save secret');
+      }
+    } catch (err) {
+      setError(err instanceof Error ? err.message : 'Failed to save secret');
+    } finally {
+      setSecretsInProgress(false);
+    }
+  };
+
   return (
     <div className="devices-page">
       {error && (
@@ -231,6 +280,56 @@ export default function AdminPage() {
           </div>
         </div>
       )}
+
+      <section className="devices-section">
+        <div className="section-header">
+          <h2>Secrets</h2>
+          <button
+            className="btn btn-secondary"
+            onClick={fetchSecrets}
+            disabled={secretsInProgress}
+          >
+            Refresh
+          </button>
+        </div>
+        <p className="hint">
+          Secrets are stored as Cloudflare Worker secrets. Values are never displayed after saving.
+        </p>
+
+        {secretList?.secrets && secretList.secrets.length > 0 ? (
+          <p className="hint">Stored secrets: {secretList.secrets.join(', ')}</p>
+        ) : (
+          <p className="hint">
+            No secrets listed (or missing `CLOUDFLARE_API_TOKEN`). You can still add a secret below.
+          </p>
+        )}
+
+        <div className="device-actions" style={{ gap: 8, display: 'flex', flexWrap: 'wrap' }}>
+          <input
+            value={secretName}
+            onChange={(e) => setSecretName(e.target.value)}
+            placeholder="SECRET_NAME (e.g. CLOUDFLARE_API_TOKEN)"
+            style={{ minWidth: 320, padding: 8 }}
+            disabled={secretsInProgress}
+          />
+          <input
+            value={secretValue}
+            onChange={(e) => setSecretValue(e.target.value)}
+            placeholder="secret value"
+            type="password"
+            style={{ minWidth: 320, padding: 8 }}
+            disabled={secretsInProgress}
+          />
+          <button
+            className="btn btn-primary"
+            onClick={handleSetSecret}
+            disabled={secretsInProgress}
+          >
+            {secretsInProgress && <ButtonSpinner />}
+            {secretsInProgress ? 'Saving...' : 'Save Secret'}
+          </button>
+        </div>
+      </section>
 
       <section className="devices-section gateway-section">
         <div className="section-header">
